@@ -32,7 +32,24 @@ Onscreenly opens without asking for anything: typing a question and résumé pre
 - **Screen & System Audio Recording**, the first time an answer looks at your screen.
 - **System Audio Recording Only** (in the same pane), only if you switch on Meeting audio in Settings → Audio, to hear the other side of a call. macOS asks the first time a session starts with it on.
 
-If you said no, allow them in **System Settings → Privacy & Security**, then quit and reopen Onscreenly. The builds are ad-hoc signed: the signature is valid but does not identify a developer. After an update, macOS may ask for these permissions again.
+If you said no, allow them in **System Settings → Privacy & Security**, then quit and reopen Onscreenly. The builds are signed with Onscreenly's own certificate, not one issued by Apple, which is why macOS asks you to confirm the first launch. See [After an update](#after-an-update) if permissions stop working after you install a new version.
+
+### After an update
+
+From 0.2.6 on, every macOS build is signed with the same certificate, so the permissions you allowed carry over to new versions.
+
+Coming from 0.2.5 or earlier, or if Onscreenly says it can't see the screen even though its switches are on in System Settings, macOS is holding a permission for the previous build. Reset it once:
+
+1. Quit Onscreenly (⌘⇧X).
+2. In **System Settings → Privacy & Security**, open **Screen & System Audio Recording**, select Onscreenly and remove it with **–**. Do the same under **Microphone**.
+3. Open Onscreenly and allow each permission again when it asks, then quit and reopen it.
+
+If **–** does not remove it, run this in Terminal, then do step 3:
+
+```sh
+tccutil reset ScreenCapture com.onscreenly.overlay
+tccutil reset Microphone com.onscreenly.overlay
+```
 
 ## Windows 10 and 11
 

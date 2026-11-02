@@ -9,6 +9,12 @@
  *     user allows it once (System Settings → Privacy & Security → Open Anyway,
  *     or `xattr -dr com.apple.quarantine`); docs/install.md walks through it.
  *
+ *   • Self-signed — set ONSCREENLY_MAC_SIGN_IDENTITY to the SHA-1 of the certificate made by
+ *     scripts/make-mac-signing-cert.sh (CI imports it from the MAC_SELF_SIGN_P12 secret). Every binary
+ *     is signed with that one certificate, so macOS keeps Microphone and Screen Recording permissions
+ *     across updates (an ad-hoc build is a new identity each time). Gatekeeper still asks once, as for
+ *     ad-hoc. See scripts/mac-self-sign.js.
+ *
  *   • Signed + notarized — set MAC_SIGN=1 with a "Developer ID Application"
  *     identity reachable in the keychain (or CSC_LINK in CI), plus
  *     APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID. electron-builder
@@ -22,6 +28,8 @@
 const hasCert = process.env.MAC_SIGN === '1';
 const canNotarize =
   hasCert && !!process.env.APPLE_ID && !!process.env.APPLE_APP_SPECIFIC_PASSWORD && !!process.env.APPLE_TEAM_ID;
+// A Developer ID certificate wins over the self-signed one when both are configured.
+const selfSign = !hasCert && !!process.env.ONSCREENLY_MAC_SIGN_IDENTITY;
 
 /** @type {import('electron-builder').Configuration} */
 module.exports = {
@@ -54,6 +62,9 @@ module.exports = {
     // runtime (notarization is refused without it). Without one, '-' signs
     // ad-hoc: no identity, but a valid signature on every binary.
     identity: hasCert ? undefined : '-',
+    // Self-signed: keep '-' so electron-builder prepares the signing, and sign with our certificate in
+    // the hook (it cannot find an untrusted identity itself).
+    sign: selfSign ? 'scripts/mac-self-sign.js' : undefined,
     hardenedRuntime: hasCert,
     gatekeeperAssess: false,
     entitlements: 'build-resources/entitlements.mac.plist',

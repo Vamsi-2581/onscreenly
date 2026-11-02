@@ -55,7 +55,13 @@ ONSCREENLY_BUNDLE_WHISPER=1 npm run dist:mac:arm64
 
 A Mac package built without the runtime cannot use local transcription unless you provide a prepared runtime using `ONSCREENLY_WHISPER_RUNTIME`. Model files are downloaded separately from the runtime.
 
-Mac builds are **ad-hoc signed** by default: every binary has a valid signature, which Apple silicon needs, but no developer identity, so Gatekeeper asks once after a download ([install guide](install.md)). Developer ID signing and notarization stay available through `MAC_SIGN=1` and the configuration in `electron-builder.cjs`. Windows builds are unsigned.
+Mac builds are signed in one of three ways (`electron-builder.cjs`):
+
+- **Self-signed (releases).** With the `MAC_SELF_SIGN_P12` and `MAC_SELF_SIGN_PASSWORD` repository secrets set, every binary is signed with one self-signed certificate. macOS keys Microphone and Screen Recording permissions on the app id plus that certificate, so they carry over from one release to the next. Gatekeeper still asks once after a download, as for ad-hoc builds. Make the certificate once on a Mac with `scripts/make-mac-signing-cert.sh` (it sets the secrets with `gh` if you have it) and **keep its folder**: a new certificate is a new identity, and every user would have to allow the permissions again. Pull requests sign with a throwaway certificate to test the same path, and the release workflow checks that every binary carries the certificate and that both architectures ask for the same identity.
+- **Ad-hoc** (no secret, e.g. a local `npm run dist:mac`): every binary has a valid signature, which Apple silicon needs, but no signer, so macOS sees each build as a new app and asks for the permissions again after an update.
+- **Developer ID and notarization** through `MAC_SIGN=1`, which also removes the Gatekeeper step.
+
+Windows builds are unsigned.
 
 ### Releases
 

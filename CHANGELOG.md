@@ -9,6 +9,7 @@ All notable changes to Onscreenly. Versions follow [Semantic Versioning](https:/
 - A notice when a newer version is out, with **Download**. The installed app asks GitHub's releases page once per launch; turn it off in Settings › API keys › Your data › New versions.
 
 ### Changed
+- macOS releases are signed with one self-signed certificate instead of ad-hoc, so Microphone and Screen Recording permissions carry over to the next version. Moving from 0.2.5 needs one reset ([install guide](docs/install.md#after-an-update)).
 - The app no longer ships the EB Garamond font, which nothing used after the guide moved into the overlay.
 
 ## [0.2.5] - 2026-10-31

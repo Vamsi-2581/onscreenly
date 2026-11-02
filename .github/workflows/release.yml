@@ -17,6 +17,9 @@ on:
       - 'build-resources/**'
       - 'scripts/after-pack.js'
       - 'scripts/prepare-whisper-runtime.js'
+      - 'scripts/mac-self-sign.js'
+      - 'scripts/ci-mac-keychain.sh'
+      - 'scripts/make-mac-signing-cert.sh'
       # Electron and dependency bumps: run the macOS and Windows app tests and packaging before merge.
       - 'package.json'
       - 'package-lock.json'
@@ -115,13 +118,34 @@ jobs:
           NOTARY_ID: ${{ github.event_name != 'pull_request' && secrets.APPLE_ID || '' }}
           NOTARY_PASSWORD: ${{ github.event_name != 'pull_request' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
           NOTARY_TEAM: ${{ github.event_name != 'pull_request' && secrets.APPLE_TEAM_ID || '' }}
+          # The self-signed certificate (scripts/make-mac-signing-cert.sh): one identity for every build,
+          # so macOS keeps users' permissions across updates. Pull requests sign with a throwaway one
+          # instead, which tests the same path without the secret.
+          SELF_SIGN_P12: ${{ github.event_name != 'pull_request' && secrets.MAC_SELF_SIGN_P12 || '' }}
+          SELF_SIGN_PASSWORD: ${{ github.event_name != 'pull_request' && secrets.MAC_SELF_SIGN_PASSWORD || '' }}
         run: |
           set -euo pipefail
+          sign_with_p12() {
+            export ONSCREENLY_MAC_SIGN_KEYCHAIN="$RUNNER_TEMP/onscreenly-signing.keychain-db"
+            ONSCREENLY_MAC_SIGN_IDENTITY="$(scripts/ci-mac-keychain.sh "$1" "$2" "$ONSCREENLY_MAC_SIGN_KEYCHAIN")"
+            export ONSCREENLY_MAC_SIGN_IDENTITY
+          }
           # Only set the signing variables when there is a certificate:
           # electron-builder treats an empty CSC_LINK as a path and fails.
           if [ -n "$CERT_LINK" ]; then
             export MAC_SIGN=1 CSC_LINK="$CERT_LINK" CSC_KEY_PASSWORD="$CERT_PASSWORD"
             export APPLE_ID="$NOTARY_ID" APPLE_APP_SPECIFIC_PASSWORD="$NOTARY_PASSWORD" APPLE_TEAM_ID="$NOTARY_TEAM"
+            echo "SIGN_MODE=developer-id" >> "$GITHUB_ENV"
+          elif [ -n "$SELF_SIGN_P12" ]; then
+            printf '%s' "$SELF_SIGN_P12" | base64 --decode > "$RUNNER_TEMP/signing.p12"
+            sign_with_p12 "$RUNNER_TEMP/signing.p12" "$SELF_SIGN_PASSWORD"
+            echo "SIGN_MODE=self-signed" >> "$GITHUB_ENV"
+          elif [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            scripts/make-mac-signing-cert.sh --ci "$RUNNER_TEMP/throwaway-cert"
+            sign_with_p12 "$RUNNER_TEMP/throwaway-cert/onscreenly-signing.p12" "$(cat "$RUNNER_TEMP/throwaway-cert/password.txt")"
+            echo "SIGN_MODE=self-signed" >> "$GITHUB_ENV"
+          else
+            echo "SIGN_MODE=ad-hoc" >> "$GITHUB_ENV"
           fi
           npm run dist:mac
 
@@ -130,10 +154,32 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          echo "Signed: $SIGN_MODE"
+          requirements=()
           for app in dist/mac*/Onscreenly.app; do
             codesign --verify --deep --strict --verbose=2 "$app"
             codesign --display --verbose=2 "$app" 2>&1 | grep -E '^(Identifier|Signature|Authority|TeamIdentifier)='
+            requirement="$(codesign --display --requirements - "$app" 2>&1 | grep '^designated')"
+            echo "$requirement"
+            requirements+=("$requirement")
+            if [ "$SIGN_MODE" = self-signed ]; then
+              # What macOS keys permissions on: the app id and the certificate, nothing about this build.
+              echo "$requirement" | grep -Eq 'identifier "com\.onscreenly\.overlay" and certificate (root|leaf) = H"' \
+                || { echo "::error::$app is not signed with the self-signed certificate"; exit 1; }
+              # Every helper and framework carries the same signer, or macOS refuses to load them.
+              find "$app/Contents/Frameworks" -maxdepth 1 \( -name '*.app' -o -name '*.framework' \) -print0 |
+                while IFS= read -r -d '' part; do
+                  codesign --display --verbose=2 "$part" 2>&1 | grep -q '^Authority=Onscreenly Self-Signed$' \
+                    || { echo "::error::$part is not signed with the self-signed certificate"; exit 1; }
+                done
+            fi
           done
+          # Both architectures, built apart, must ask for the same identity: that is what lets the
+          # next release inherit this one's permissions.
+          if [ "$SIGN_MODE" = self-signed ] && [ "${#requirements[@]}" -gt 1 ]; then
+            [ "$(printf '%s\n' "${requirements[@]}" | sort -u | wc -l)" -eq 1 ] \
+              || { echo "::error::the builds ask for different identities"; exit 1; }
+          fi
 
       - name: Build Windows (installer and portable)
         if: runner.os == 'Windows'
